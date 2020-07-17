@@ -18,115 +18,292 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	rbacV1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ChaosExperimentSpec defines the desired state of ChaosExperiment
+// ChaosEngineSpec defines the desired state of ChaosEngine
 // +k8s:openapi-gen=true
-// An experiment is the definition of a chaos test and is listed as an item
-// in the chaos engine to be run against a given app.
-type ChaosExperimentSpec struct {
-	// Definition carries low-level chaos options
-	Definition ExperimentDef `json:"definition"`
+// ChaosEngineSpec describes a user-facing custom resource which is used by developers
+// to create a chaos profile
+type ChaosEngineSpec struct {
+	//Appinfo contains deployment details of AUT
+	Appinfo ApplicationParams `json:"appinfo"`
+	//AnnotationCheck defines whether annotation check is allowed or not. It can be true or false
+	AnnotationCheck string `json:"annotationCheck,omitempty"`
+	//ChaosServiceAccount is the SvcAcc specified for chaos runner pods
+	ChaosServiceAccount string `json:"chaosServiceAccount"`
+	//Components contains the image, imagePullPolicy, arguments, and commands of runner
+	Components ComponentParams `json:"components"`
+	//Consists of experiments executed by the engine
+	Experiments []ExperimentList `json:"experiments"`
+	//Monitor Enable Status
+	Monitoring bool `json:"monitoring,omitempty"`
+	//JobCleanUpPolicy decides to retain or delete the jobs
+	JobCleanUpPolicy CleanUpPolicy `json:"jobCleanUpPolicy,omitempty"`
+	//AuxiliaryAppInfo contains details of dependent applications (infra chaos)
+	AuxiliaryAppInfo string `json:"auxiliaryAppInfo,omitempty"`
+	//EngineStatus is a requirement for validation
+	EngineState EngineState `json:"engineState"`
 }
 
-// ChaosExperimentStatus defines the observed state of ChaosExperiment
+// EngineState provides interface for all supported strings in spec.EngineState
+type EngineState string
+
+const (
+	// EngineStateActive starts the reconcile call
+	EngineStateActive EngineState = "active"
+	// EngineStateStop stops the reconcile call
+	EngineStateStop EngineState = "stop"
+)
+
+// ExperimentStatus is typecasted to string for supporting the values below.
+type ExperimentStatus string
+
+const (
+	// ExperimentStatusRunning is status of Experiment which is currently running
+	ExperimentStatusRunning ExperimentStatus = "Running"
+	// ExperimentStatusCompleted is status of Experiment which has been completed
+	ExperimentStatusCompleted ExperimentStatus = "Completed"
+	// ExperimentStatusWaiting is status of Experiment which will be executed via a Job
+	ExperimentStatusWaiting ExperimentStatus = "Waiting for Job Creation"
+	// ExperimentStatusNotFound is status of Experiment which is not found inside ChaosNamespace
+	ExperimentStatusNotFound ExperimentStatus = "ChaosExperiment Not Found"
+	// ExperimentStatusSuccessful is status of a Successful experiment execution
+	ExperimentStatusSuccessful ExperimentStatus = "Execution Successful"
+	// ExperimentStatusAborted is status of a Experiment is forcefully aborted
+	ExperimentStatusAborted ExperimentStatus = "Forcefully Aborted"
+)
+
+// EngineStatus provides interface for all supported strings in status.EngineStatus
+type EngineStatus string
+
+const (
+	// EngineStatusInitialized is used for reconcile calls to start reconcile for creation
+	EngineStatusInitialized EngineStatus = "initialized"
+	// EngineStatusCompleted is used for reconcile calls to start reconcile for completion
+	EngineStatusCompleted EngineStatus = "completed"
+	// EngineStatusStopped is used for reconcile calls to start reconcile for delete
+	EngineStatusStopped EngineStatus = "stopped"
+)
+
+// CleanUpPolicy defines the garbage collection method used by chaos-operator
+type CleanUpPolicy string
+
+const (
+	//CleanUpPolicyDelete sets the garbage collection policy of chaos-operator to Delete Chaos Resources
+	CleanUpPolicyDelete CleanUpPolicy = "delete"
+
+	//CleanUpPolicyRetain sets the garbage collection policy of chaos-operator to Retain Chaos Resources
+	CleanUpPolicyRetain CleanUpPolicy = "retain"
+)
+
+// ChaosEngineStatus defines the observed state of ChaosEngine
 // +k8s:openapi-gen=true
-type ChaosExperimentStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	// Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
+
+// ChaosEngineStatus derives information about status of individual experiments
+type ChaosEngineStatus struct {
+	//EngineStatus is a typed string to support limited values for ChaosEngine Status
+	EngineStatus EngineStatus `json:"engineStatus"`
+	//Detailed status of individual experiments
+	Experiments []ExperimentStatuses `json:"experiments"`
 }
 
-// ConfigMap is an simpler implementation of corev1.ConfigMaps, needed for experiments
-type ConfigMap struct {
-	Data      map[string]string `json:"data,omitempty"`
-	Name      string            `json:"name"`
-	MountPath string            `json:"mountPath"`
+// ApplicationParams defines information about Application-Under-Test (AUT) on the cluster
+// Controller expects AUT to be annotated with litmuschaos.io/chaos: "true" to run chaos
+type ApplicationParams struct {
+	//Namespace of the AUT
+	Appns string `json:"appns"`
+	//Unique label of the AUT
+	Applabel string `json:"applabel"`
+	//kind of application
+	AppKind string `json:"appkind"`
 }
 
-// Secret is an simpler implementation of corev1.Secret
-type Secret struct {
-	Name      string `json:"name"`
-	MountPath string `json:"mountPath"`
+// ComponentParams defines information about the runner
+type ComponentParams struct {
+	//Contains informations of the the runner pod
+	Runner RunnerInfo `json:"runner"`
 }
 
-type HostFile struct {
-	Name      string `json:"name"`
-	MountPath string `json:"mountPath"`
-	NodePath  string `json:"nodePath"`
-}
-
-// ExperimentDef defines information about nature of chaos & components subjected to it
-type ExperimentDef struct {
-	// Default labels of the runner pod
-	// +optional
-	Labels map[string]string `json:"labels"`
-	// Image of the chaos experiment
-	Image string `json:"image"`
-	// ImagePullPolicy of the chaos experiment container
+// RunnerInfo defines the information of the runnerinfo pod
+type RunnerInfo struct {
+	//Image of the runner pod
+	Image string `json:"image,omitempty"`
+	//Type of runner
+	Type string `json:"type,omitempty"`
+	//Args of runner
+	Args []string `json:"args,omitempty"`
+	//Command for runner
+	Command []string `json:"command,omitempty"`
+	//ImagePullPolicy for runner pod
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
-	//Scope specifies the service account scope (& thereby blast radius) of the experiment
-	Scope string `json:"scope"`
-	// List of Permission needed for a service account to execute experiment
-	Permissions []rbacV1.PolicyRule `json:"permissions"`
-	// List of ENV vars passed to executor pod
-	ENVList []ENVPair `json:"env"`
-	// Defines command to invoke experiment
-	Command []string `json:"command"`
-	// Defines arguments to runner's entrypoint command
-	Args []string `json:"args"`
-	// ConfigMaps contains a list of ConfigMaps
-	ConfigMaps []ConfigMap `json:"configmaps,omitempty"`
-	// Secrets contains a list of Secrets
-	Secrets []Secret `json:"secrets,omitempty"`
-	// HostFileVolume defines the host directory/file to be mounted
-	HostFileVolumes []HostFile `json:"hostFileVolumes,omitempty"`
-	// Annotations that needs to be provided in the pod for pod that is getting created
-	ExperimentAnnotations map[string]string `json:"experimentannotations,omitempty"`
-	// SecurityContext holds security configuration that will be applied to a container
-	SecurityContext SecurityContext `json:"securityContext,omitempty"`
-	// HostPID is need to be provided in the chaospod
-	HostPID bool `json:"hostPID,omitempty"`
+	// Runner Annotations that needs to be provided in the pod for pod that is getting created
+	RunnerAnnotation map[string]string `json:"runnerannotation,omitempty"`
 }
 
-// SecurityContext defines the security contexts of the pod and container.
-type SecurityContext struct {
-	// PodSecurityContext holds security configuration that will be applied to a pod
-	PodSecurityContext corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
-	// ContainerSecurityContext holds security configuration that will be applied to a container
-	ContainerSecurityContext corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
+// ExperimentList defines information about chaos experiments defined in the chaos engine
+// These experiments are "pulled" as versioned charts from a "hub"
+type ExperimentList struct {
+	//Name of the chaos experiment
+	Name string `json:"name"`
+	//Holds properties of an experiment listed in the engine
+	Spec ExperimentAttributes `json:"spec"`
 }
 
-// ENVPair defines env var list to hold chaos params
-type ENVPair struct {
+// ExperimentAttributes defines attributes of experiments
+type ExperimentAttributes struct {
+	//Execution priority of the chaos experiment
+	Rank uint32 `json:"rank"`
+	// It contains env, configmaps, secrets, experimentImage, node selector, custom experiment annotation
+	// which can be provided or overridden from the chaos engine
+	Components ExperimentComponents `json:"components,omitempty"`
+	// K8sProbe contains details of k8s probe, which can be applied on the experiments
+	K8sProbe []K8sProbeAttributes `json:"k8sProbe,omitempty"`
+	// CmdProbe contains details of cmd probe, which can be applied on the experiments
+	CmdProbe []CmdProbeAttributes `json:"cmdProbe,omitempty"`
+	// HTTPProbe contains details of http probe, which can be applied on the experiments
+	HTTPProbe []HTTPProbeAttributes `json:"httpProbe,omitempty"`
+}
+
+// K8sProbeAttributes contains details of k8s probe, which can be applied on the experiments
+type K8sProbeAttributes struct {
+	// Name of probe
+	Name string `json:"name,omitempty"`
+	// inputs needed for the k8s probe
+	Inputs K8sProbeInputs `json:"inputs,omitempty"`
+	// RunProperty contains timeout, retry and interval for the probe
+	RunProperties RunProperty `json:"runProperties,omitempty"`
+}
+
+// CmdProbeAttributes contains details of cmd probe, which can be applied on the experiments
+type CmdProbeAttributes struct {
+	// Name of probe
+	Name string `json:"name,omitempty"`
+	// inputs needed for the cmd probe
+	Inputs CmdProbeInputs `json:"inputs,omitempty"`
+	// RunProperty contains timeout, retry and interval for the probe
+	RunProperties RunProperty `json:"runProperties,omitempty"`
+	// mode for cmd probe
+	// it can be SOT, EOT, Edge, Continuous
+	Mode string `json:"mode,omitempty"`
+}
+
+// HTTPProbeAttributes contains details of k8s probe, which can be applied on the experiments
+type HTTPProbeAttributes struct {
+	// Name of probe
+	Name string `json:"name,omitempty"`
+	// inputs needed for the http probe
+	Inputs HTTPProbeInputs `json:"inputs,omitempty"`
+	// RunProperty contains timeout, retry and interval for the probe
+	RunProperties RunProperty `json:"runProperties,omitempty"`
+}
+
+// K8sProbeInputs contains all the inputs required for k8s probe
+type K8sProbeInputs struct {
+	// Command need to be executed for the probe
+	Command K8sCommand `json:"command,omitempty"`
+	// Expected output or result of the command
+	ExpectedResult string `json:"expectedResult,omitempty"`
+}
+
+// K8sCommand contains all the commands need for the k8sprobe
+type K8sCommand struct {
+	// group of the resource
+	Group string `json:"group,omitempty"`
+	// apiversion of the resource
+	Version string `json:"version,omitempty"`
+	// kind of resource
+	Resource string `json:"resource,omitempty"`
+	// namespace of the resource
+	Namespace string `json:"namespace,omitempty"`
+	// fieldselector to get the details
+	FieldSelector string `json:"fieldSelector,omitempty"`
+	// name of the resource
+	Name string `json:"name,omitempty"`
+	// label of the resource
+	Label string `json:"label,omitempty"`
+}
+
+//CmdProbeInputs contains all the inputs required for cmd probe
+type CmdProbeInputs struct {
+	// Command need to be executed for the probe
+	Command string `json:"command,omitempty"`
+	// Expected output or result of the command
+	ExpectedResult string `json:"expectedResult,omitempty"`
+	// The source where we have to run the command
+	// It can be a image or inline(inside experiment itself)
+	Source string `json:"source,omitempty"`
+}
+
+//HTTPProbeInputs contains all the inputs required for http probe
+type HTTPProbeInputs struct {
+	// URL which needs to curl, to check the status
+	URL string `json:"url,omitempty"`
+	// Expected response code from the given url
+	ExpectedResponseCode string `json:"expectedResponseCode,omitempty"`
+}
+
+//RunProperty contains timeout, retry and interval for the probe
+type RunProperty struct {
+	//ProbeTimeout contains timeout for the probe
+	ProbeTimeout int `json:"probeTimeout,omitempty"`
+	// Interval contains the inverval for the probe
+	Interval int `json:"interval,omitempty"`
+	// Retry contains the retry count for the probe
+	Retry int `json:"retry,omitempty"`
+}
+
+// ExperimentComponents contains ENV, Configmaps and Secrets
+type ExperimentComponents struct {
+	ENV                   []ExperimentENV   `json:"env,omitempty"`
+	ConfigMaps            []ConfigMap       `json:"configMaps,omitempty"`
+	Secrets               []Secret          `json:"secrets,omitempty"`
+	ExperimentAnnotations map[string]string `json:"experimentannotation,omitempty"`
+	ExperimentImage       string            `json:"experimentImage,omitempty"`
+	NodeSelector          map[string]string `json:"nodeSelector,omitempty"`
+}
+
+// ExperimentENV varibles to override the default values in chaosexperiment
+type ExperimentENV struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
+// ExperimentStatuses defines information about status of individual experiments
+// These fields are immutable, and are derived by kubernetes(operator)
+type ExperimentStatuses struct {
+	//Name of experiment whose status is detailed
+	Name string `json:"name"`
+	//Current state of chaos experiment
+	Status ExperimentStatus `json:"status"`
+	//Result of a completed chaos experiment
+	Verdict string `json:"verdict"`
+	//Time of last state change of chaos experiment
+	LastUpdateTime metav1.Time `json:"lastUpdateTime"`
+}
+
 // +genclient
-// +resource:path=chaosexperiment
+// +resource:path=chaosengine
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// ChaosExperiment is the Schema for the chaosexperiments API
+// ChaosEngine is the Schema for the chaosengines API
 // +k8s:openapi-gen=true
-type ChaosExperiment struct {
+type ChaosEngine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ChaosExperimentSpec   `json:"spec,omitempty"`
-	Status ChaosExperimentStatus `json:"status,omitempty"`
+	Spec   ChaosEngineSpec   `json:"spec,omitempty"`
+	Status ChaosEngineStatus `json:"status,omitempty"`
 }
 
-// ChaosExperimentList contains a list of ChaosExperiment
+// ChaosEngineList contains a list of ChaosEngine
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ChaosExperimentList struct {
+type ChaosEngineList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ChaosExperiment `json:"items"`
+	Items           []ChaosEngine `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&ChaosExperiment{}, &ChaosExperimentList{})
+	SchemeBuilder.Register(&ChaosEngine{}, &ChaosEngineList{})
 }
