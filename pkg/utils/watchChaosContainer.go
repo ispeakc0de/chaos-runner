@@ -2,12 +2,14 @@ package utils
 
 import (
 	"context"
+	"github.com/litmuschaos/chaos-runner/pkg/log"
 	"time"
 
 	"github.com/litmuschaos/litmus-go/pkg/utils/retry"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // GetChaosPod gets the chaos experiment pod object launched by the runner
@@ -41,14 +43,10 @@ func GetChaosPod(expDetails *ExperimentDetails, clients ClientSets) (*corev1.Pod
 }
 
 // GetChaosContainerStatus gets status of the chaos container
-func GetChaosContainerStatus(experimentDetails *ExperimentDetails, clients ClientSets) (bool, error) {
+func GetChaosContainerStatus(experimentDetails *ExperimentDetails, pod *corev1.Pod, startTime time.Time) (bool, error) {
 
 	isCompleted := false
 
-	pod, err := GetChaosPod(experimentDetails, clients)
-	if err != nil {
-		return false, errors.Errorf("unable to get the chaos pod, error: %v", err)
-	}
 	if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded {
 		for _, container := range pod.Status.ContainerStatuses {
 
@@ -58,29 +56,16 @@ func GetChaosContainerStatus(experimentDetails *ExperimentDetails, clients Clien
 			if container.Name == experimentDetails.JobName && container.State.Terminated != nil {
 				if container.State.Terminated.Reason == "Completed" {
 					isCompleted = !container.Ready
-
 				}
 			}
 		}
 
 	} else if pod.Status.Phase == corev1.PodPending {
-		delay := 2
-		err := retry.
-			Times(uint(experimentDetails.StatusCheckTimeout / delay)).
-			Wait(time.Duration(delay) * time.Second).
-			Try(func(attempt uint) error {
-				pod, err := GetChaosPod(experimentDetails, clients)
-				if err != nil {
-					return errors.Errorf("unable to get the chaos pod, error: %v", err)
-				}
-				if pod.Status.Phase == corev1.PodPending {
-					return errors.Errorf("chaos pod is in %v state", corev1.PodPending)
-				}
-				return nil
-			})
-		if err != nil {
-			return isCompleted, err
+		currentTime := time.Duration(experimentDetails.StatusCheckTimeout) * time.Second
+		if time.Now().Sub(startTime) > currentTime {
+			return isCompleted, errors.Errorf("chaos pod is in %v state", corev1.PodPending)
 		}
+		return false, nil
 	} else if pod.Status.Phase == corev1.PodFailed {
 		return isCompleted, errors.Errorf("status check failed as chaos pod status is %v", pod.Status.Phase)
 	}
@@ -91,27 +76,44 @@ func GetChaosContainerStatus(experimentDetails *ExperimentDetails, clients Clien
 // WatchChaosContainerForCompletion watches the chaos container for completion
 func (engineDetails EngineDetails) WatchChaosContainerForCompletion(experiment *ExperimentDetails, clients ClientSets) error {
 
-	//TODO: use watch rather than checking for status manually.
-	isChaosCompleted := false
+	expPod, err := clients.KubeClient.CoreV1().Pods(experiment.Namespace).Watch(context.Background(), metav1.ListOptions{LabelSelector: "job-name=" + experiment.JobName})
+	if err != nil {
+		return err
+	}
 
-	var err error
-	for !isChaosCompleted {
-		isChaosCompleted, err = GetChaosContainerStatus(experiment, clients)
-		if err != nil {
-			return err
-		}
+	defer expPod.Stop()
 
-		var expStatus ExperimentStatus
-		chaosPod, err := GetChaosPod(experiment, clients)
-		if err != nil {
-			return errors.Errorf("unable to get the chaos pod, error: %v", err)
-		}
+	startTime := time.Now()
 
-		expStatus.AwaitedExperimentStatus(experiment.Name, engineDetails.Name, chaosPod.Name)
-		if err := expStatus.PatchChaosEngineStatus(engineDetails, clients); err != nil {
-			return errors.Errorf("unable to patch ChaosEngine in namespace: %v, error: %v", engineDetails.EngineNamespace, err)
+loop:
+	for {
+		select {
+		case event := <-expPod.ResultChan():
+			pod := event.Object.(*corev1.Pod)
+
+			if event.Type == watch.Added {
+				var expStatus ExperimentStatus
+				expStatus.AwaitedExperimentStatus(experiment.Name, engineDetails.Name, pod.Name)
+				if err := expStatus.PatchChaosEngineStatus(engineDetails, clients); err != nil {
+					return errors.Errorf("unable to patch ChaosEngine in namespace: %v, error: %v", engineDetails.EngineNamespace, err)
+				}
+			}
+
+			if event.Type == watch.Deleted {
+				log.Info("experiment pod deleted")
+				continue
+				//expPod.Stop()
+				//return errors.Errorf("experiment pod is deleted unexpectedly")
+			}
+
+			completed, err := GetChaosContainerStatus(experiment, pod, startTime)
+			if err != nil {
+				return err
+			}
+			if completed {
+				break loop
+			}
 		}
-		time.Sleep(2 * time.Second)
 	}
 	return nil
 }
