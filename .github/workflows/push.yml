@@ -13,7 +13,7 @@ jobs:
       # Install golang
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.20.0
+          go-version: 1.22
 
       # Checkout to the latest commit
       # On specific directory/path
@@ -73,14 +73,14 @@ jobs:
       # Install golang
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.20.0
+          go-version: 1.22
 
       - name: Build chaos-runner image
         run: make build-amd64
 
       #Install and configure a kind cluster
       - name: Installing Prerequisites (K3S Cluster)
-        env: 
+        env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.21.11+k3s1 sh -s - --docker --write-kubeconfig-mode 664
@@ -90,13 +90,13 @@ jobs:
           kubectl get nodes
 
       - name: Dependency checks
-        env: 
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml      
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           make deps
 
       - name: Running Go BDD Test
-        env: 
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml      
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           make test

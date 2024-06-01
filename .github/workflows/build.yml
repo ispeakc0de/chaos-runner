@@ -10,7 +10,7 @@ jobs:
       # Install golang
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.20.0
+          go-version: 1.22
 
       # Checkout to the latest commit
       # On specific directory/path
@@ -37,7 +37,7 @@ jobs:
           wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz && \
           tar -zxvf gitleaks_8.18.2_linux_x64.tar.gz && \
           sudo mv gitleaks /usr/local/bin && gitleaks detect --source . -v
-        
+
   trivy:
     needs: pre-checks
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
       - name: Build an image from Dockerfile
         run: |
           docker build -f build/Dockerfile -t docker.io/litmuschaos/chaos-runner:${{ github.sha }} . --build-arg TARGETPLATFORM=linux/amd64
-      
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
@@ -58,7 +58,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'                
+          severity: 'CRITICAL,HIGH'
 
   image-build:
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
       # Install golang
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.20.0
+          go-version: 1.22
 
       # Checkout to the latest commit
       # On specific directory/path
@@ -93,7 +93,7 @@ jobs:
 
       #Install and configure a kind cluster
       - name: Installing Prerequisites (K3S Cluster)
-        env: 
+        env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.21.11+k3s1 sh -s - --docker --write-kubeconfig-mode 664
@@ -103,13 +103,13 @@ jobs:
           kubectl get nodes
 
       - name: Dependency checks
-        env: 
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml      
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           make deps
 
       - name: Running Go BDD Test
-        env: 
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml      
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           make test
